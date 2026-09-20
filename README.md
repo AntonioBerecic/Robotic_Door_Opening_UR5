@@ -211,14 +211,16 @@ plot_ur5_table_offsets.py                          Offset-evaluation plots
 ur5door.yaml                                       Reproducible Conda environment
 ```
 
-## Attribution and citation
+## Acknowledgements
 
-This project builds on the simulation code accompanying:
+This repository extends the simulation code from
+[Robotic Door Opening with Tactile Simulation](https://github.com/quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation),
+developed by Zihan Ding, Ya-Yen Tsai, Wang Wei Lee, and Bidan Huang for
+“Sim-to-Real Transfer for Robotic Manipulation with Tactile Sensory,” IROS 2021.
 
-> Zihan Ding, Ya-Yen Tsai, Wang Wei Lee, and Bidan Huang,
-> “Sim-to-Real Transfer for Robotic Manipulation with Tactile Sensory,” IROS 2021.
+### Citation
 
-If you use this repository, please cite the original work:
+The original work can be cited as:
 
 ```bibtex
 @article{ding2021sim,
@@ -228,6 +230,3 @@ If you use this repository, please cite the original work:
   year={2021}
 }
 ```
-
-Original repository:
-[quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation](https://github.com/quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation)
