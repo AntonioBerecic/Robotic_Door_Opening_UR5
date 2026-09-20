@@ -5,6 +5,9 @@ Robotiq three-finger gripper in MuJoCo. The project uses TD3 and supports tactil
 observations, wrist force/torque sensing, domain randomization, checkpoint
 evaluation, and robustness tests for table-position offsets.
 
+This project was developed as part of a master's thesis on reinforcement
+learning for robotic door opening in simulation.
+
 This repository is a UR5-focused extension of
 [Robotic Door Opening with Tactile Simulation](https://github.com/quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation)
 by Zihan Ding, Ya-Yen Tsai, Wang Wei Lee, and Bidan Huang. The original Franka
