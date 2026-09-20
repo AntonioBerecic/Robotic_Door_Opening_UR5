@@ -207,3 +207,10 @@ dmypy.json
 .pytype/
 
 # End of https://www.toptal.com/developers/gitignore/api/python,emacs
+
+# Generated training and evaluation artifacts
+/data/weights/
+/log/
+/MUJOCO_LOG.TXT
+/training_log*.txt
+/ur5_*_offsets*.png

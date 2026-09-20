@@ -59,6 +59,17 @@ class RobotiqThreeFingerGripperBase(Gripper):
         ]
 
     @property
+    def left_finger_geoms(self):
+        # finger_1 i middle prst = "lijeva" strana za detekciju kontakta
+        return ["f1_l0", "f1_l1", "f1_l2", "f1_l3",
+                "f3_l0", "f3_l1", "f3_l2", "f3_l3"]
+
+    @property
+    def right_finger_geoms(self):
+        # finger_2 = "desna" strana
+        return ["f2_l0", "f2_l1", "f2_l2", "f2_l3"]
+
+    @property
     def visualization_sites(self):
         return ["grip_site", "grip_site_cylinder"]
 

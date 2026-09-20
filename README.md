@@ -1,7 +1,19 @@
-# Tactile-based Door Opening with Franka Panda Robot in Simulation
+# Tactile-based Door Opening with UR5 and Franka Panda Robots in Simulation
 
 Official code for our paper [**Sim-to-Real Transfer for Robotic Manipulation with Tactile Sensory**
 Zihan Ding, Ya-Yen Tsai, Wang Wei Lee, Bidan Huang *International Conference on Intelligent Robots and Systems (IROS) 2021*](https://arxiv.org/abs/2103.00410) (for simulation part only).
+
+This fork extends the [original project](https://github.com/quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation)
+with UR5 robot support while retaining the original Franka Panda implementation.
+
+## UR5 extension
+
+The extension adds:
+
+* a UR5 robot model and door-opening environment;
+* Robotiq gripper integration;
+* wrist force/torque observations and optional CSV logging;
+* evaluation, plotting, and environment-inspection utilities.
 
 ## Description:
 
@@ -81,6 +93,23 @@ Please cite the our paper if you make use of this repo:
 
   ```bash
   python train.py --test --env pandaopendoorfktactile --model MODEL_TIME --model_id MODEL_INDEX --render
+  ```
+
+* Inspect the UR5 wrist force/torque sensor during evaluation. The console output
+  shows raw force (N), raw torque (Nm), their magnitudes, and the normalized six
+  values passed to the policy. `--ft_log` additionally saves every sample to CSV:
+
+  ```bash
+  python train.py --test --env ur5opendoorfktactile \
+    --model MODEL_TIME --model_id MODEL_INDEX --render \
+    --debug_ft --debug_ft_every 10 --ft_log log/ft_evaluation.csv
+  ```
+
+  Plot the resulting force/torque log (add `--show` for an interactive window):
+
+  ```bash
+  python plot_ft_results.py log/ft_evaluation.csv \
+    --output log/ft_evaluation_plot.png
   ```
   
   

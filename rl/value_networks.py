@@ -39,20 +39,23 @@ class QNetwork(QNetworkBase):
         super().__init__(state_space, action_space, activation)
 
         self.linear1 = nn.Linear(self._state_dim+self._action_dim, hidden_dim)
+        self.ln1 = nn.LayerNorm(hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        self.ln2 = nn.LayerNorm(hidden_dim)
         self.linear3 = nn.Linear(hidden_dim, hidden_dim)
+        self.ln3 = nn.LayerNorm(hidden_dim)
         self.linear4 = nn.Linear(hidden_dim, output_dim)
         # weights initialization
         # self.linear4.apply(linear_weights_init)
-        torch.nn.init.xavier_uniform_(self.linear1.weight)
-        torch.nn.init.xavier_uniform_(self.linear2.weight)
-        torch.nn.init.xavier_uniform_(self.linear3.weight)
-        torch.nn.init.xavier_uniform_(self.linear4.weight)
+        torch.nn.init.orthogonal_(self.linear1.weight, gain=np.sqrt(2))
+        torch.nn.init.orthogonal_(self.linear2.weight, gain=np.sqrt(2))
+        torch.nn.init.orthogonal_(self.linear3.weight, gain=np.sqrt(2))
+        torch.nn.init.orthogonal_(self.linear4.weight, gain=np.sqrt(2))
         
     def forward(self, state, action):
         x = torch.cat([state, action], 1) # the dim 0 is number of samples
-        x = self.activation(self.linear1(x))
-        x = self.activation(self.linear2(x))
-        x = self.activation(self.linear3(x))
+        x = self.activation(self.ln1(self.linear1(x)))
+        x = self.activation(self.ln2(self.linear2(x)))
+        x = self.activation(self.ln3(self.linear3(x)))
         x = self.linear4(x)
-        return x        
+        return x

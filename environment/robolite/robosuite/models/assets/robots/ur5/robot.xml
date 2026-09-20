@@ -1,0 +1,91 @@
+<mujoco model="ur5">
+    <actuator>
+        <velocity ctrllimited="true" ctrlrange="-2.0944 2.0944" joint="joint1" kv="2.0" name="vel_right_j1" />
+        <velocity ctrllimited="true" ctrlrange="-2.0944 2.0944" joint="joint2" kv="2.0" name="vel_right_j2" />
+        <velocity ctrllimited="true" ctrlrange="-2.0944 2.0944" joint="joint3" kv="2.0" name="vel_right_j3" />
+        <velocity ctrllimited="true" ctrlrange="-3.1416 3.1416" joint="joint4" kv="2.0" name="vel_right_j4" />
+        <velocity ctrllimited="true" ctrlrange="-3.1416 3.1416" joint="joint5" kv="2.0" name="vel_right_j5" />
+        <velocity ctrllimited="true" ctrlrange="-3.1416 3.1416" joint="joint6" kv="2.0" name="vel_right_j6" />
+    </actuator>
+
+    <asset>
+        <mesh name="base" file="meshes/base.stl" />
+        <mesh name="shoulder" file="meshes/shoulder.stl" />
+        <mesh name="upperarm" file="meshes/upperarm.stl" />
+        <mesh name="forearm" file="meshes/forearm.stl" />
+        <mesh name="wrist1" file="meshes/wrist1.stl" />
+        <mesh name="wrist2" file="meshes/wrist2.stl" />
+        <mesh name="wrist3" file="meshes/wrist3.stl" />
+    </asset>
+
+   <worldbody>
+    <body name="base_link" pos="0 0 0.85">
+        <inertial pos="0 0 0" mass="4.0" diaginertia="0.3 0.3 0.3" />
+        <geom name="base_col" type="mesh" mesh="base" contype="1" conaffinity="1" group="0" />
+        <geom name="base_vis" type="mesh" mesh="base" contype="0" conaffinity="0" group="1" />
+
+        <body name="shoulder_link" pos="0 0 0.089159">
+            <inertial pos="0 0 0" mass="3.7" diaginertia="0.3 0.3 0.3" />
+            <joint name="joint1" pos="0 0 0" axis="0 0 1" limited="true" range="-6.2832 6.2832" damping="0.5" armature="0.5" />
+            <geom name="link1_collision" type="mesh" mesh="shoulder" contype="1" conaffinity="1" group="0" />
+            <geom name="link1_visual" type="mesh" mesh="shoulder" contype="0" conaffinity="0" group="1" />
+
+            <body name="upper_arm_link" pos="0 0.13585 0" quat="0.707107 0 0.707107 0">
+                <inertial pos="0 0 0.28" mass="8.393" diaginertia="0.4 0.4 0.1" />
+                <joint name="joint2" pos="0 0 0" axis="0 1 0" limited="true" range="-6.2832 6.2832" damping="0.5" armature="0.5" />
+                <geom name="link2_collision" type="mesh" mesh="upperarm"
+                      contype="1" conaffinity="1" group="0" />
+                <geom name="link2_visual" type="mesh" mesh="upperarm"
+                      contype="0" conaffinity="0" group="1" />
+
+                <body name="forearm_link" pos="0 -0.1197 0.425">
+                    <inertial pos="0 0 0.25" mass="2.275" diaginertia="0.1 0.1 0.04" />
+                    <joint name="joint3" pos="0 0 0" axis="0 1 0" limited="true" range="-6.2832 6.2832" damping="0.5" armature="0.5" />
+                    <geom name="link3_collision" type="mesh" mesh="forearm" contype="1" conaffinity="1" group="0" />
+                    <geom name="link3_visual" type="mesh" mesh="forearm" contype="0" conaffinity="0" group="1" />
+
+                    <body name="wrist_1_link" pos="0 0 0.39225" quat="0.707107 0 0.707107 0">
+                        <inertial pos="0 0 0" mass="1.5" diaginertia="0.05 0.05 0.02" />
+                        <joint name="joint4" pos="0 0 0" axis="0 1 0" limited="true"
+                               range="-6.2832 6.2832" damping="0.5" armature="0.1" />
+                        <geom name="link4_collision" type="mesh" mesh="wrist1"
+                              contype="1" conaffinity="1" group="0" />
+                        <geom name="link4_visual" type="mesh" mesh="wrist1"
+                              contype="0" conaffinity="0" group="1" />
+
+                        <body name="wrist_2_link" pos="0 0.093 0">
+                            <inertial pos="0 0 0" mass="1.5" diaginertia="0.05 0.05 0.02" />
+                            <joint name="joint5" pos="0 0 0" axis="0 0 1" limited="true"
+                                   range="-6.2832 6.2832" damping="0.5" armature="0.1" />
+                            <geom name="link5_collision" type="mesh" mesh="wrist2"
+                                  contype="1" conaffinity="1" group="0" />
+                            <geom name="link5_visual" type="mesh" mesh="wrist2"
+                                  contype="0" conaffinity="0" group="1" />
+
+                            <body name="wrist_3_link" pos="0 0 0.09465">
+                                <inertial pos="0 0 0" mass="0.5" diaginertia="0.01 0.01 0.005" />
+                                <joint name="joint6" pos="0 0 0" axis="0 1 0" limited="true"
+                                       range="-6.2832 6.2832" damping="0.1" armature="0.05" />
+                                <geom name="link6_collision" type="mesh" mesh="wrist3"
+                                      contype="1" conaffinity="1" group="0" />
+                                <geom name="link6_visual" type="mesh" mesh="wrist3"
+                                      contype="0" conaffinity="0" group="1" />
+
+                                <body name="right_hand" pos="0 0.0823 0" quat="0 0 0.7071068 0.7071068">
+                                </body>
+
+                                <site name="ft_sensor_site" pos="0 0 0" size="0.01" rgba="1 0 0 0" />
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </body>
+        </body>
+    </body>
+</worldbody>
+
+    <sensor>
+        <force name="ft_force" site="ft_sensor_site" />
+        <torque name="ft_torque" site="ft_sensor_site" />
+    </sensor>
+</mujoco>

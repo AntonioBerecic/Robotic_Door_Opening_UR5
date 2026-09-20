@@ -48,14 +48,18 @@ class DPG_PolicyNetwork(PolicyNetworkBase):
         self.machine_type = machine_type
         
         self.linear1 = nn.Linear(self._state_dim, hidden_dim)
+        self.ln1 = nn.LayerNorm(hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        self.ln2 = nn.LayerNorm(hidden_dim)
         self.linear3 = nn.Linear(hidden_dim, hidden_dim)
+        self.ln3 = nn.LayerNorm(hidden_dim)
         self.linear4 = nn.Linear(hidden_dim, hidden_dim) 
+        self.ln4 = nn.LayerNorm(hidden_dim)
 
-        torch.nn.init.xavier_uniform_(self.linear1.weight)
-        torch.nn.init.xavier_uniform_(self.linear2.weight)
-        torch.nn.init.xavier_uniform_(self.linear3.weight)
-        torch.nn.init.xavier_uniform_(self.linear4.weight)
+        torch.nn.init.orthogonal_(self.linear1.weight, gain=np.sqrt(2))
+        torch.nn.init.orthogonal_(self.linear2.weight, gain=np.sqrt(2))
+        torch.nn.init.orthogonal_(self.linear3.weight, gain=np.sqrt(2))
+        torch.nn.init.orthogonal_(self.linear4.weight, gain=np.sqrt(2))
 
         self.output_linear = nn.Linear(hidden_dim, self._action_dim) # output dim = dim of action
         # weights initialization
@@ -64,10 +68,10 @@ class DPG_PolicyNetwork(PolicyNetworkBase):
     
 
     def forward(self, state, hidden_activation=F.relu, output_activation=F.tanh):
-        x = hidden_activation(self.linear1(state)) 
-        x = hidden_activation(self.linear2(x))
-        x = hidden_activation(self.linear3(x))
-        x = hidden_activation(self.linear4(x))
+        x = hidden_activation(self.ln1(self.linear1(state)))
+        x = hidden_activation(self.ln2(self.linear2(x)))
+        x = hidden_activation(self.ln3(self.linear3(x)))
+        x = hidden_activation(self.ln4(self.linear4(x)))
         output  = output_activation(self.output_linear(x))
         return output
 
@@ -79,38 +83,26 @@ class DPG_PolicyNetwork(PolicyNetworkBase):
         ''' add noise '''
         normal = Normal(0, 1)
         eval_noise_clip = 2*noise_scale
+        device = next(self.parameters()).device
         noise = normal.sample(action.shape) * noise_scale
         noise = torch.clamp(
         noise,
         -eval_noise_clip,
         eval_noise_clip)
-        if self.machine_type == 'gpu':
-            try:
-                action = self.action_range*action + noise.cuda()
-            except:
-                action = self.action_range*action + noise
-        else:  # cpu
-            action = self.action_range*action + noise
-        return action
+        action = self.action_range*action + noise.to(device)
+        return torch.clamp(action, -self.action_range, self.action_range)
 
 
     def get_action(self, state, noise_scale=0.0):
         '''
         select action for sampling, no gradients flow, noisy action, return .cpu
         '''
-        if self.machine_type == 'gpu':
-            try:
-                state = torch.FloatTensor(state).unsqueeze(0).cuda() # state dim: (N, dim of state)
-            except:
-                state = torch.FloatTensor(state).unsqueeze(0)
-        else:  # cpu
-            state = torch.FloatTensor(state).unsqueeze(0)
+        device = next(self.parameters()).device
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)
         action = self.forward(state)
         action = action.detach().cpu().numpy()[0] 
         ''' add noise '''
         normal = Normal(0, 1)
         noise = noise_scale * normal.sample(action.shape)
         action=self.action_range*action + noise.numpy()
-
-        return action
-
+        return np.clip(action, -self.action_range, self.action_range)

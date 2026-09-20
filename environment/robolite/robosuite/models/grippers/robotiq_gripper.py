@@ -17,7 +17,7 @@ class RobotiqGripperBase(Gripper):
 
     @property
     def init_qpos(self):
-        return [3.3161, 0., 0., 0., 0., 0.]
+        return [0., 0., 0., 0., 0., 0.]
 
     @property
     def joints(self):

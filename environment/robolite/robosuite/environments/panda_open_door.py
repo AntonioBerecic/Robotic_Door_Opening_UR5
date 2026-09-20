@@ -102,6 +102,7 @@ class PandaOpenDoor(change_dof(PandaEnv, 8, 8)): # keep the dimension to control
                  use_tactile=False,
                  full_obs=False,
                  reward_shaping=True,
+                 legacy_reward=False,
                  placement_initializer=None,
                  object_obs_process=True,
                  **kwargs):
@@ -132,6 +133,7 @@ class PandaOpenDoor(change_dof(PandaEnv, 8, 8)): # keep the dimension to control
 
         # reward configuration
         self.reward_shaping = reward_shaping
+        self.legacy_reward = bool(legacy_reward)
 
         # object placement initializer
         if placement_initializer:
@@ -165,6 +167,8 @@ class PandaOpenDoor(change_dof(PandaEnv, 8, 8)): # keep the dimension to control
 
         self.object_obs_process = object_obs_process
         self.grasp_state = False
+        self.previous_door_open_angle = 0.0
+        self.grasp_rewarded = False
 
         super().__init__(gripper_visualization=True, **kwargs)
 
@@ -237,6 +241,8 @@ class PandaOpenDoor(change_dof(PandaEnv, 8, 8)): # keep the dimension to control
         """
         super()._reset_internal()
         self.grasp_state = False
+        self.previous_door_open_angle = 0.0
+        self.grasp_rewarded = False
         self.sim.forward()
 
         # reset positions of objects
@@ -278,42 +284,31 @@ class PandaOpenDoor(change_dof(PandaEnv, 8, 8)): # keep the dimension to control
         #     print('Contact {}: {} and {}'.format(i, self.sim.model.geom_id2name(c.geom1), self.sim.model.geom_id2name(c.geom2)))
         # self.ee_ori = quat2euler(mat2quat(self._right_hand_orn))
 
-        open_multi = 5.
+        if self.legacy_reward:
+            return self._legacy_reward(action)
+
         dis_multi = 0.4
         ori_multi = 0.05
-        grasp_multi = 1.
-        tac_multi = 0.01
-        force_multi = 0.1
-
-        reward = 0.
         self.door_open_angle = abs(self.sim.data.get_joint_qpos("hinge0"))
-
-        # door open angle reward
-        reward_door_open = 0.
-        # If the gripper is nearly closed, ignore the reward for door opening; fully closed is about 0.001
-        # However, the self.get_gripper_state() can be inaccurate sometimes, so deprecate this approach.
-        # if self.get_gripper_state() > 0.002:  
-        #     reward_door_open += self.door_open_angle
-        if self.grasp_state:  # only count for the door opening reward when the knob is grasped by the robot
-            reward_door_open += self.door_open_angle
+        gripper_state = self.get_gripper_state()
 
         # distance and orientation rewards for reaching
         reward_dist = 0.
         reward_ori = 0.
         if self.door_open_angle < 0.02:
             # A distance reward: minimize the distance between the gripper and door konb when the door is almost closed 
-            reward_dist = -1. - np.tanh(np.linalg.norm(self.get_hand2knob_dist_vec())) # ensure this is penalty, such that openning door is always encouraged
+            # soften per-step penalty to avoid large cumulative negative rewards
+            reward_dist = -0.1 - 0.1 * np.tanh(np.linalg.norm(self.get_hand2knob_dist_vec())) # ensure this is penalty, such that openning door is always encouraged
 
             # An orientation reward: make the orientation of gripper horizontal (better for knob grasping) when the door is almost closed 
             fingerEulerDesired =  [0, 0, -np.pi/2]  # horizontal gesture for gripper
             finger_ori = self.get_finger_ori()
             ori_diff = sin_cos_encoding(fingerEulerDesired) - sin_cos_encoding(finger_ori)  # use sin_cos_encoding to avoid value jump in 2PI measure
-            reward_ori = -1. - np.tanh(np.linalg.norm(ori_diff))  # ensure this is penalty, such that openning door is always encouraged
+            reward_ori = -0.1 - 0.1 * np.tanh(np.linalg.norm(ori_diff))  # ensure this is penalty, such that openning door is always encouraged
 
         # grasping reward
         touch_left_finger = False
         touch_right_finger = False
-        reward_grasp = 0.
         for i in range(self.sim.data.ncon):
             c = self.sim.data.contact[i]
             if c.geom1 in self.l_finger_geom_ids and c.geom2 == self.knob_geom_id:
@@ -324,35 +319,85 @@ class PandaOpenDoor(change_dof(PandaEnv, 8, 8)): # keep the dimension to control
                 touch_right_finger = True
             if c.geom1 == self.knob_geom_id and c.geom2 in self.r_finger_geom_ids:
                 touch_right_finger = True
-        if touch_left_finger and touch_right_finger and self.get_gripper_state()>0.005: # the grasping detection here (when True) not only requires the knob to be grasped by the gripper, but also in a good gesture
+        if touch_left_finger and touch_right_finger and gripper_state > 0.005: # the grasping detection here (when True) not only requires the knob to be grasped by the gripper, but also in a good gesture
             self.grasp_state = True
-            reward_grasp += 0.1
         else:
             self.grasp_state = False
 
-        # an additional reward for providing more tactile signals
-        if self.use_tactile and self.door_open_angle > 0.02 and self.get_gripper_state()>0.005:  # only when door is open and gripper is not fully closed (contact with itself)
-            reward_tactile = np.sum(self._get_tactile_singals()) 
+        opening_progress = (
+            self.door_open_angle - self.previous_door_open_angle)
+        self.previous_door_open_angle = self.door_open_angle
+        reward_grasp = 0.0
+        if self.grasp_state and not self.grasp_rewarded:
+            reward_grasp = 2.0
+            self.grasp_rewarded = True
+
+        reward = (50.0 * opening_progress + dis_multi * reward_dist +
+                  ori_multi * reward_ori + reward_grasp - 0.01)
+
+        self.success = self._check_success()
+        if self.success:
+            reward += 100.0
+
+        return reward
+
+    def _legacy_reward(self, action=None):
+        """Reward used by the valid 55D Panda runs from 2026-07-13/14."""
+        self.door_open_angle = abs(
+            self.sim.data.get_joint_qpos("hinge0"))
+        gripper_state = self.get_gripper_state()
+
+        reward_door_open = (
+            self.door_open_angle if self.grasp_state else 0.0)
+        reward_dist = 0.0
+        reward_ori = 0.0
+        if self.door_open_angle < 0.02:
+            reward_dist = -0.1 - 0.1 * np.tanh(
+                np.linalg.norm(self.get_hand2knob_dist_vec()))
+            desired_orientation = [0, 0, -np.pi / 2]
+            orientation_delta = (
+                sin_cos_encoding(desired_orientation) -
+                sin_cos_encoding(self.get_finger_ori()))
+            reward_ori = -0.1 - 0.1 * np.tanh(
+                np.linalg.norm(orientation_delta))
+
+        touch_left_finger = False
+        touch_right_finger = False
+        for i in range(self.sim.data.ncon):
+            contact = self.sim.data.contact[i]
+            if (contact.geom1 in self.l_finger_geom_ids and
+                    contact.geom2 == self.knob_geom_id):
+                touch_left_finger = True
+            if (contact.geom1 == self.knob_geom_id and
+                    contact.geom2 in self.l_finger_geom_ids):
+                touch_left_finger = True
+            if (contact.geom1 in self.r_finger_geom_ids and
+                    contact.geom2 == self.knob_geom_id):
+                touch_right_finger = True
+            if (contact.geom1 == self.knob_geom_id and
+                    contact.geom2 in self.r_finger_geom_ids):
+                touch_right_finger = True
+
+        reward_grasp = 0.0
+        if (touch_left_finger and touch_right_finger and
+                gripper_state > 0.005):
+            self.grasp_state = True
+            reward_grasp = 1.0
         else:
-            reward_tactile = 0.
+            self.grasp_state = False
 
-        # additional reward for minimizing force
-        ee_force = np.abs(self.sim.data.get_sensor('force_ee'))
-        reward_force = np.tanh(1./(ee_force + 1e-5))
-        # print(reward_door_open, reward_dist, reward_ori, reward_grasp, reward_tactile)
-        # a summary of reward values
-        reward = open_multi*reward_door_open + dis_multi*reward_dist + ori_multi*reward_ori + grasp_multi*reward_grasp + tac_multi*reward_tactile  
-        # reward = open_multi*reward_door_open + grasp_multi*reward_grasp + tac_multi*reward_tactile + force_multi*reward_force # only a open-door policy
+        if (self.use_tactile and self.door_open_angle > 0.02 and
+                gripper_state > 0.005):
+            reward_tactile = float(np.sum(self._get_tactile_singals()))
+        else:
+            reward_tactile = 0.0
 
-        # print('force: ', self.sim.data.get_sensor('force_ee'))  # Gives one value
-        # print('torque: ', self.sim.data.get_sensor('torque_ee'))  # Gives one value
-        # print(self.sim.data.sensordata[:6])
-        # print(self.sim.data.sensordata[7::3]) # Gives array of all sensorvalues: force tactile
-        # print(self._get_tactile_singals())
-        # print(self.sim.data.sensordata[6:]) # Gives array of all sensorvalues: touch tactile
-
-        self.done = self._check_success()
-
+        reward = (5.0 * reward_door_open + 0.4 * reward_dist +
+                  0.05 * reward_ori + reward_grasp +
+                  0.01 * reward_tactile)
+        self.success = self._check_success()
+        if self.success:
+            reward += 50.0
         return reward
     
     def _check_success(self):
@@ -360,10 +405,16 @@ class PandaOpenDoor(change_dof(PandaEnv, 8, 8)): # keep the dimension to control
         Returns True if task has been completed.
         """
 
-        if self.door_open_angle >= 1.55: # 1.57 ~ PI/2
-            return True
-        else:
-            return False
+        return bool(self.door_open_angle >= 1.55) # 1.57 ~ PI/2
+
+    def _post_action(self, action):
+        reward, _, info = super()._post_action(action)
+        success = bool(getattr(self, "success", self._check_success()))
+        timeout = (self.timestep >= self.horizon) and not self.ignore_done
+        self.done = bool(success or timeout)
+        info["success"] = success
+        info["timeout"] = bool(timeout)
+        return reward, self.done, info
 
     def _get_tactile_singals(self, contact_threshold=1e-3, Binary=True):
         """

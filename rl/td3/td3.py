@@ -30,6 +30,8 @@ class TD3_Trainer():
         self.replay_buffer = replay_buffer
         self.hidden_dim = hidden_dim
         self.machine_type = machine_type
+        self.device = torch.device(
+            'cuda' if machine_type == 'gpu' and torch.cuda.is_available() else 'cpu')
 
         self.q_net1 = QNetwork(state_space, action_space, hidden_dim)
         self.q_net2 = QNetwork(state_space, action_space, hidden_dim)
@@ -46,6 +48,15 @@ class TD3_Trainer():
         self.target_q_net1 = self.target_ini(self.q_net1, self.target_q_net1)
         self.target_q_net2 = self.target_ini(self.q_net2, self.target_q_net2)
         self.target_policy_net = self.target_ini(self.policy_net, self.target_policy_net)
+
+        # Move parameters before optimizers are constructed. Moving a module
+        # afterwards can leave an optimizer referring to the old parameters.
+        self.q_net1.to(self.device)
+        self.q_net2.to(self.device)
+        self.target_q_net1.to(self.device)
+        self.target_q_net2.to(self.device)
+        self.policy_net.to(self.device)
+        self.target_policy_net.to(self.device)
     
         self.update_cnt = 0
         self.policy_target_update_interval = policy_target_update_interval
@@ -55,12 +66,10 @@ class TD3_Trainer():
         self.policy_optimizer = SharedAdam(self.policy_net.parameters(), lr=policy_lr)
 
     def to_cuda(self):
-        self.q_net1 = self.q_net1.cuda()
-        self.q_net2 = self.q_net2.cuda()
-        self.target_q_net1 = self.target_q_net1.cuda()
-        self.target_q_net2 = self.target_q_net2.cuda()
-        self.policy_net = self.policy_net.cuda()
-        self.target_policy_net = self.target_policy_net.cuda()
+        if self.device.type != 'cuda':
+            raise RuntimeError(
+                "TD3_Trainer must be constructed with machine_type='gpu'; "
+                "moving it after optimizer creation is unsafe")
     
     def target_ini(self, net, target_net):
         for target_param, param in zip(target_net.parameters(), net.parameters()):
@@ -84,18 +93,12 @@ class TD3_Trainer():
             except Exception as e:
                 print(e)
             
-        if self.machine_type == 'gpu':        
-            state      = torch.FloatTensor(state).cuda()
-            next_state = torch.FloatTensor(next_state).cuda()
-            action     = torch.FloatTensor(action).cuda()
-            reward     = torch.FloatTensor(reward).unsqueeze(1).cuda()  # reward is single value, unsqueeze() to add one dim to be [reward] at the sample dim;
-            done       = torch.FloatTensor(np.float32(done)).unsqueeze(1).cuda()
-        else:  # if not gpu, then cpu
-            state      = torch.FloatTensor(state)
-            next_state = torch.FloatTensor(next_state)
-            action     = torch.FloatTensor(action)
-            reward     = torch.FloatTensor(reward).unsqueeze(1)  # reward is single value, unsqueeze() to add one dim to be [reward] at the sample dim;
-            done       = torch.FloatTensor(np.float32(done)).unsqueeze(1)
+        state      = torch.as_tensor(state, dtype=torch.float32, device=self.device)
+        next_state = torch.as_tensor(next_state, dtype=torch.float32, device=self.device)
+        action     = torch.as_tensor(action, dtype=torch.float32, device=self.device)
+        reward     = torch.as_tensor(reward, dtype=torch.float32, device=self.device).unsqueeze(1)
+        done       = torch.as_tensor(np.float32(done), dtype=torch.float32,
+                                     device=self.device).unsqueeze(1)
 
         predicted_q_value1 = self.q_net1(state, action)
         predicted_q_value2 = self.q_net2(state, action)
@@ -159,10 +162,14 @@ class TD3_Trainer():
         torch.save(self.policy_net.state_dict(), path+'_policy')
 
     def load_model(self, path):
-        device = 'cuda:0' if torch.cuda.is_available() and self.machine_type == 'gpu' else 'cpu'
-        self.q_net1.load_state_dict(torch.load(path+'_q1', map_location=device))
-        self.q_net2.load_state_dict(torch.load(path+'_q2', map_location=device))
-        self.policy_net.load_state_dict(torch.load(path+'_policy', map_location=device))
+        self.q_net1.load_state_dict(torch.load(path+'_q1', map_location=self.device))
+        self.q_net2.load_state_dict(torch.load(path+'_q2', map_location=self.device))
+        self.policy_net.load_state_dict(torch.load(path+'_policy', map_location=self.device))
+        # A loaded online model must not continue with randomly initialized
+        # targets; this is especially important when fine-tuning.
+        self.target_ini(self.q_net1, self.target_q_net1)
+        self.target_ini(self.q_net2, self.target_q_net2)
+        self.target_ini(self.policy_net, self.target_policy_net)
         # self.q_net1.eval()
         # self.q_net2.eval()
         # self.policy_net.eval()
@@ -179,158 +186,83 @@ class TD3_Trainer():
         ShareParameters(self.policy_optimizer)
 
 
-def worker(id, td3_trainer, envs, env_name, rewards_queue, eval_rewards_queue, success_queue,\
-        eval_success_queue, eval_interval, replay_buffer, max_episodes, max_steps, batch_size,\
-        explore_steps, noise_decay, update_itr, explore_noise_scale, eval_noise_scale, reward_scale,\
-        gamma, soft_tau, DETERMINISTIC, hidden_dim, model_path, render, randomized_params, seed=1):
-    '''
-    the function for sampling with multi-processing
-    '''
-    with torch.cuda.device(id % torch.cuda.device_count()):
-        td3_trainer.to_cuda()
-        print(td3_trainer, replay_buffer)
-        try:
-            env = gym.make(envs[env_name])  # mujoco env
-        except:
-            env = envs[env_name]()  # robot env
-        frame_idx=0
-        rewards=[]
-        current_explore_noise_scale = explore_noise_scale
-        last_savepoint = 0
-        for eps in range(max_episodes): # training loop
-            episode_reward = 0
-            if randomized_params:
-                state = env.reset(**(rand_params(env, params=randomized_params)[0]))
-            else:
-                state = env.reset()
-            current_explore_noise_scale = current_explore_noise_scale*noise_decay
-            
-            for step in range(max_steps):
-                if frame_idx > explore_steps:
-                    action = td3_trainer.policy_net.get_action(state, noise_scale=current_explore_noise_scale)
-                else:
-                    action = td3_trainer.policy_net.sample_action()
-                try:
-                    next_state, reward, done, info = env.step(action)
-                    if render: 
-                        env.render()   
-                except KeyboardInterrupt:
-                    print('Finished')
-                    td3_trainer.save_model(model_path)
-                except MujocoException:
-                    print('MujocoException')
-                    # recreate an env, since sometimes reset not works, the env might be broken
-                    try:
-                        env = gym.make(env_name)  # mujoco env
-                    except:
-                        env = envs[env_name]()  # robot env
+def collector_worker(id, policy, policy_lock, episode_counter, envs, env_name,
+        rewards_queue, replay_buffer, max_episodes, max_steps, explore_steps,
+        num_workers, noise_decay, explore_noise_scale, action_range, render,
+        randomized_params, env_kwargs=None, seed=1):
+    """Collect experience on CPU; network optimization belongs to the learner."""
+    worker_seed = seed + id + 1
+    torch.manual_seed(worker_seed)
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+    env_kwargs = dict(env_kwargs or {})
+    env = envs[env_name](**env_kwargs)
+    frame_idx = 0
+    # Distribute the initial random exploration budget across collectors.
+    worker_explore_steps = int(math.ceil(float(explore_steps) / num_workers))
 
-                    # td3_trainer.policy_net = td3_trainer.target_ini(td3_trainer.target_policy_net, td3_trainer.policy_net)  # reset policy net as target net
-                    try:  # recover the policy from last savepoint
-                        td3_trainer.load_model(model_path+'/{}_td3'.format(last_savepoint))
-                    except:
-                        print('Error: no last savepoint: ', last_savepoint)
-                    break
+    for eps in range(max_episodes):
+        episode_reward = 0.0
+        episode_success = False
+        episode_max_door_angle = 0.0
+        episode_min_knob_distance = float('inf')
+        episode_min_orientation_error = float('inf')
+        with episode_counter.get_lock():
+            global_episode = episode_counter.value
+            episode_counter.value += 1
+        current_noise = explore_noise_scale * (noise_decay ** global_episode)
 
-                if np.isnan(np.sum([np.sum(state), np.sum(action), reward, np.sum(next_state), done])): # prevent nan in data 
-                    print('Nan in data')
-                    # print(state, action, reward, next_state, done)
-                else: # prevent nan in data 
-                    replay_buffer.push(state, action, reward, next_state, done)
-                
-                state = next_state
-                episode_reward += reward
-                frame_idx += 1
-                
-                if done:
-                    break
-            print('Worker: ', id, '|Episode: ', eps, '| Episode Reward: ', episode_reward, '| Step: ', step)
-            rewards_queue.put(episode_reward)
-
-            if eps % eval_interval == 0 and eps>0:  # only one process update
-                td3_trainer.save_model(model_path+'/{}_td3'.format(eps))
-                last_savepoint = eps
-
-            if replay_buffer.get_length() > batch_size:
-                for i in range(update_itr):
-                    _=td3_trainer.update(batch_size, eval_noise_scale=eval_noise_scale, reward_scale=reward_scale, \
-                        gamma=gamma, soft_tau=soft_tau)
-        td3_trainer.save_model(model_path+'/{}_td3'.format(eps))
-
-
-def cpu_worker(id, td3_trainer, envs, env_name, rewards_queue, eval_rewards_queue, success_queue,\
-        eval_success_queue, eval_interval, replay_buffer, max_episodes, max_steps, batch_size,\
-        explore_steps, noise_decay, update_itr, explore_noise_scale, eval_noise_scale, reward_scale,\
-        gamma, soft_tau, DETERMINISTIC, hidden_dim, model_path, render, randomized_params, seed=1):
-    '''
-    the function for sampling with multi-processing
-    '''
-    # td3_trainer.to_cuda()
-    print(td3_trainer, replay_buffer)
-    try:
-        env = gym.make(env_name)  # mujoco env
-    except:
-        env = envs[env_name]()  # robot env
-    frame_idx=0
-    rewards=[]
-    current_explore_noise_scale = explore_noise_scale
-    last_savepoint = 0
-    for eps in range(max_episodes): # training loop
-        episode_reward = 0
         if randomized_params:
             state = env.reset(**(rand_params(env, params=randomized_params)[0]))
         else:
             state = env.reset()
-        current_explore_noise_scale = current_explore_noise_scale*noise_decay
-        
+
         for step in range(max_steps):
-            if frame_idx > explore_steps:
-                action = td3_trainer.policy_net.get_action(state, noise_scale=current_explore_noise_scale)
+            assert np.all(np.isfinite(state)), "Non-finite state detected"
+            if frame_idx < worker_explore_steps:
+                action = np.random.uniform(
+                    -action_range, action_range, size=policy._action_dim)
             else:
-                action = td3_trainer.policy_net.sample_action()
+                # Prevent the learner from publishing parameters halfway through
+                # a collector forward pass.
+                with policy_lock:
+                    action = policy.get_action(state, noise_scale=current_noise)
+            action = np.clip(action, -action_range, action_range)
+
             try:
                 next_state, reward, done, info = env.step(action)
-                if render: 
-                    env.render()   
-            except KeyboardInterrupt:
-                print('Finished')
-                td3_trainer.save_model(model_path)
+                episode_success = episode_success or bool(info.get('success', False))
+                episode_max_door_angle = max(
+                    episode_max_door_angle,
+                    float(info.get('door_open_angle', 0.0)))
+                episode_min_knob_distance = min(
+                    episode_min_knob_distance,
+                    float(info.get('distance_to_knob', float('inf'))))
+                episode_min_orientation_error = min(
+                    episode_min_orientation_error,
+                    float(info.get('orientation_error', float('inf'))))
+                if render:
+                    env.render()
             except MujocoException:
-                print('MujocoException')
-                # recreate an env, since sometimes reset not works, the env might be broken
-                try:  
-                    env = gym.make(env_name)  # mujoco env
-                except:
-                    env = envs[env_name]()  # robot env
-
-                # td3_trainer.policy_net = td3_trainer.target_ini(td3_trainer.target_policy_net, td3_trainer.policy_net)  # reset policy net as target net
-                try: # recover the policy from last savepoint
-                    td3_trainer.load_model(model_path+'/{}_td3'.format(last_savepoint))
-                except:
-                    print('Error: no last savepoint: ', last_savepoint)
+                print('Worker:', id, '| MujocoException; recreating environment')
+                env = envs[env_name](**env_kwargs)
                 break
 
-            if np.isnan(np.sum([np.sum(state), np.sum(action), reward, np.sum(next_state), done])): # prevent nan in data 
-                print('Nan in data')
-                # print(state, action, reward, next_state, done)
-            else: # prevent nan in data 
-                replay_buffer.push(state, action, reward, next_state, done)    
+            values = [np.sum(state), np.sum(action), reward, np.sum(next_state)]
+            if np.all(np.isfinite(values)):
+                replay_buffer.push(state, action, reward, next_state, done)
+            else:
+                print('Worker:', id, '| Non-finite transition skipped')
 
             state = next_state
             episode_reward += reward
             frame_idx += 1
             if done:
                 break
-        print('Worker: ', id, '|Episode: ', eps, '| Episode Reward: ', episode_reward, '| Step: ', step)
-        rewards_queue.put(episode_reward)
 
-        if eps % eval_interval == 0 and eps>0:
-            td3_trainer.save_model(model_path+'/{}_td3'.format(eps))
-            last_savepoint = eps
-
-        if replay_buffer.get_length() > batch_size:
-            for i in range(update_itr):
-                _=td3_trainer.update(batch_size, eval_noise_scale=eval_noise_scale, reward_scale=reward_scale, \
-                    gamma=gamma, soft_tau=soft_tau)
-    
-    td3_trainer.save_model(model_path+'/{}_td3'.format(eps))
+        print('Worker:', id, '|Episode:', eps, '| Episode Reward:',
+              episode_reward, '| Step:', step, '| Success:', episode_success,
+              '| Min knob distance:', episode_min_knob_distance,
+              '| Min orientation error:', episode_min_orientation_error,
+              '| Max door angle:', episode_max_door_angle)
+        rewards_queue.put((episode_reward, episode_success, step + 1))
