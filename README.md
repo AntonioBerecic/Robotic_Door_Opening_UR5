@@ -10,6 +10,12 @@ This repository is a UR5-focused extension of
 by Zihan Ding, Ya-Yen Tsai, Wang Wei Lee, and Bidan Huang. The original Franka
 Panda environment remains available for compatibility.
 
+<p align="center">
+  <img src="img/ur5_door_simulation.png" alt="UR5 door-opening simulation with a Robotiq three-finger gripper">
+</p>
+
+<p align="center"><em>UR5 door-opening environment with a Robotiq three-finger gripper in MuJoCo.</em></p>
+
 ## Features
 
 - UR5 robot model with six controlled arm joints
