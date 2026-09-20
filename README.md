@@ -1,117 +1,233 @@
-# Tactile-based Door Opening with UR5 and Franka Panda Robots in Simulation
+# UR5 Door Opening with Tactile and Force/Torque Simulation
 
-Official code for our paper [**Sim-to-Real Transfer for Robotic Manipulation with Tactile Sensory**
-Zihan Ding, Ya-Yen Tsai, Wang Wei Lee, Bidan Huang *International Conference on Intelligent Robots and Systems (IROS) 2021*](https://arxiv.org/abs/2103.00410) (for simulation part only).
+Reinforcement-learning environment for opening a door with a UR5 robot and a
+Robotiq three-finger gripper in MuJoCo. The project uses TD3 and supports tactile
+observations, wrist force/torque sensing, domain randomization, checkpoint
+evaluation, and robustness tests for table-position offsets.
 
-This fork extends the [original project](https://github.com/quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation)
-with UR5 robot support while retaining the original Franka Panda implementation.
+This repository is a UR5-focused extension of
+[Robotic Door Opening with Tactile Simulation](https://github.com/quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation)
+by Zihan Ding, Ya-Yen Tsai, Wang Wei Lee, and Bidan Huang. The original Franka
+Panda environment remains available for compatibility.
 
-## UR5 extension
+## Features
 
-The extension adds:
+- UR5 robot model with six controlled arm joints
+- Robotiq three-finger gripper with movable or fixed finger flexion
+- MuJoCo door-opening task and shaped reward
+- TD3 training with parallel exploration workers
+- Optional raw or normalized six-axis wrist F/T observations
+- Optional simulated tactile observations
+- Domain randomization of table position
+- CSV logging and plots for force/torque evaluation
+- Policy robustness sweeps over table x/y offsets
+- Compatibility mode for legacy UR5 and Panda checkpoints
 
-* a UR5 robot model and door-opening environment;
-* Robotiq gripper integration;
-* wrist force/torque observations and optional CSV logging;
-* evaluation, plotting, and environment-inspection utilities.
+## Requirements
 
-## Description:
+The provided environment targets Linux with:
 
-![image](https://github.com/quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation/blob/master/img/tactile_robot_door_open.png)
+- Python 3.8
+- MuJoCo 2.1
+- `mujoco-py==2.1.2.14`
+- PyTorch, Gym, NumPy, Matplotlib, and TensorBoard
 
-Robot: Franka Emika Panda
+MuJoCo and its system libraries must be installed before `mujoco-py` can be
+used. The Conda file contains the Python environment, but it does not install
+the MuJoCo binary itself.
 
-* DOF: 7 joints + 1 gripper (symmetric for left/right fingers)
-* control mode: velocity control (given velocity target at each timestep) + forward kinematics
+## Installation
 
-Environment: Door Opening Task
+Clone the repository and create the supplied Conda environment:
 
-Additional sensor: self-developed capacitive tactile sensor (simulated with force sensor in MuJoCo)
+```bash
+git clone https://github.com/AntonioBerecic/Robotic_Door_Opening_UR5.git
+cd Robotic_Door_Opening_UR5
 
-Simulator: MuJoCo
-
-Dependencies: robosuite, openai gym, MuJoCo, mujoco-py, torch, etc
-
-## Installation:
-* Needs MuJoCo and mujoco-py installed first.
-
-* Check the requirements of *robosuite* package, we use a local version of it named "robolite" (which supports domain randomisation and inverse kinematics).
-
-  ```bash
-  pip install -r requirements.txt
-  cd environment/robolite
-  pip install -e .
-  ```
-
-   Install with ```-e .``` so that later change of package *robosuite* will  no longer require re-installation.
-   
-   Alternatively, we have an independent repo for [robolite](https://github.com/quantumiracle/robolite). Just go there and clone and `pip install`.
-   
-## Citation:
-Please cite the our paper if you make use of this repo:
+conda env create -f ur5door.yaml
+conda activate ur5door
+pip install -e ./environment/robolite
 ```
+
+The editable `robolite` installation is required so that the included UR5
+environment and model changes are used directly from this repository.
+
+For an existing compatible environment, the smaller dependency list can be
+installed instead:
+
+```bash
+pip install -r requirements.txt
+pip install -e ./environment/robolite
+```
+
+## Quick environment check
+
+Initialize the UR5 environment, sample one action, and validate observation and
+action dimensions without starting training:
+
+```bash
+python train.py --env ur5opendoorfktactile
+```
+
+To inspect the robot, gripper joints, actuators, and several poses in the MuJoCo
+viewer:
+
+```bash
+python view_env.py
+```
+
+## Training
+
+Train the default UR5 policy with TD3:
+
+```bash
+python train.py --train --env ur5opendoorfktactile --process 2
+```
+
+Use the shorter preset for iteration and debugging:
+
+```bash
+python train.py --train --env ur5opendoorfktactile --process 2 --fast
+```
+
+The main training values are defined in `default_params.py`. They can also be
+overridden from the command line, for example:
+
+```bash
+python train.py --train --env ur5opendoorfktactile \
+  --max_episodes 3000 --max_steps 500 --update_itr 10 \
+  --explore_steps 2000 --eval_interval 250
+```
+
+Checkpoints are written to `data/weights/`, while reward histories are written
+to `log/`. These generated directories are intentionally excluded from Git.
+
+## Force/torque observation modes
+
+The UR5 environment supports three F/T modes:
+
+| Option | Observation | Intended use |
+| --- | --- | --- |
+| `--no_ft` | F/T values excluded | Default training mode |
+| `--use_ft` | Six raw F/T values | New experiments using wrist sensing |
+| `--normalized_ft` | Six legacy-scaled values | Compatibility with older checkpoints |
+
+Pass the same observation mode during training and evaluation. A mismatch
+changes the policy input size and prevents a checkpoint from loading correctly.
+
+Example with raw F/T observations:
+
+```bash
+python train.py --train --env ur5opendoorfktactile --use_ft --process 2
+```
+
+By default, the seventh policy action controls gripper flexion. To run a
+six-action policy with fixed fingers, specify a flexion value:
+
+```bash
+python train.py --train --env ur5opendoorfktactile \
+  --fixed_gripper_flexion 0.1 --process 2
+```
+
+## Checkpoint evaluation
+
+Evaluate a saved checkpoint with rendering:
+
+```bash
+python train.py --test --env ur5opendoorfktactile \
+  --model MODEL_DIRECTORY --model_id CHECKPOINT_ID --render --no_ft
+```
+
+`MODEL_DIRECTORY` is normally a directory inside `data/weights/`, and
+`CHECKPOINT_ID` is the numeric checkpoint prefix created during training.
+
+For an older checkpoint, the compatibility options are available when needed:
+
+```bash
+python train.py --test --env ur5opendoorfktactile \
+  --model MODEL_DIRECTORY --model_id CHECKPOINT_ID --render \
+  --normalized_ft --legacy_reward
+```
+
+## Force/torque logging
+
+Print wrist measurements during evaluation and save every sample to CSV:
+
+```bash
+python train.py --test --env ur5opendoorfktactile \
+  --model MODEL_DIRECTORY --model_id CHECKPOINT_ID --render \
+  --use_ft --debug_ft --debug_ft_every 10 \
+  --ft_log log/ft_evaluation.csv
+```
+
+Create a plot from the resulting log:
+
+```bash
+python plot_ft_results.py log/ft_evaluation.csv \
+  --output log/ft_evaluation_plot.png
+```
+
+Add `--show` to display the plot interactively.
+
+## Table-offset robustness evaluation
+
+Evaluate a trained UR5 policy over a grid of table-position offsets:
+
+```bash
+python test_ur5_table_offsets.py \
+  --model MODEL_DIRECTORY --model_id CHECKPOINT_ID \
+  --limit_cm 5 --step_cm 1 --no_render
+```
+
+The evaluator records success, episode reward, end-effector distance,
+orientation error, and door angle. Plot one or more result files with:
+
+```bash
+python plot_ur5_table_offsets.py RESULTS.csv --show
+```
+
+Use `--sweep axes` instead of the default grid to vary one axis at a time.
+
+## Panda compatibility
+
+The original Panda task is still registered and can be run with:
+
+```bash
+python train.py --train --env pandaopendoorfktactile --process 2
+```
+
+## Project structure
+
+```text
+environment/ur5opendoorfktactile.py              Gym-style UR5 wrapper
+environment/robolite/robosuite/environments/     UR5 and door task logic
+environment/robolite/robosuite/models/            Robot and gripper models
+rl/td3/                                            TD3 implementation
+default_params.py                                  Training hyperparameters
+train.py                                           Training and evaluation entry point
+test_ur5_table_offsets.py                          Robustness evaluator
+plot_ft_results.py                                 Wrist F/T plots
+plot_ur5_table_offsets.py                          Offset-evaluation plots
+ur5door.yaml                                       Reproducible Conda environment
+```
+
+## Attribution and citation
+
+This project builds on the simulation code accompanying:
+
+> Zihan Ding, Ya-Yen Tsai, Wang Wei Lee, and Bidan Huang,
+> “Sim-to-Real Transfer for Robotic Manipulation with Tactile Sensory,” IROS 2021.
+
+If you use this repository, please cite the original work:
+
+```bibtex
 @article{ding2021sim,
   title={Sim-to-Real Transfer for Robotic Manipulation with Tactile Sensory},
   author={Ding, Zihan and Tsai, Ya-Yen and Lee, Wang Wei and Huang, Bidan},
   journal={arXiv preprint arXiv:2103.00410},
   year={2021}
 }
-
 ```
 
-## Important Files:
-
-* In ```./environment/robolite/robosuite/models/assets/grippers```  file ```panda_gripper_tactile.xml``` defines the model of Franka gripper with tactile sensors mounted on left and right fingers, also with a 3D-printed adaptors for mounting. ```panda_gripper.xml``` is the original gripper. The tactile sensors are modeled as force sensors in Mujoco, named as "touch_xx_body" in the xml.
-* In ```./environment/robolite/robosuite/models/assets/grippers/meshes/panda_gripper```  file ```finger_vis_tactile.stl``` is the 3D cad model of the tactile base on the fingertip used in this project. 
-* In ```./environment/robolite/robosuite/models/assets/grippers/meshes/panda_gripper```  file ```finger_vis.stl``` is the original 3D cad model of the Franka gripper finger tip.
-* In ```./environment/robolite/robosuite/models/grippers``` file ```panda_gripper_tactile.py``` defines the script of the gripper with tactile sensors. It reads the ```panda_gripper_tactile.xml```. It is called by ```gripper_factor.py```. 
-* In ```./environment/robolite/robosuite/models/grippers``` file ```gripper_factory.py``` is called by ```./environments/panda.py```. The robot and the gripper are loaded independently.
-* In ```./environment/robolite/robosuite/models/assets/arenas``` file ```table_cabinet_arena.xml``` defines the model of environment with the door (mounted on a cabinet) on the table, with necessary STL files in ```cabinet/```.
-* In ```./environment/robolite/robosuite/models/arenas``` file ```table_cabinet_arena.py``` defines the script of the environment.
-* In ```./environment/robolite/robosuite/environments``` file ```panda_open_door.py``` defines the robotic door opening task (**important!**). Reward is defined here.
-* In ```./environment``` file ```pandaopendoorfktactile.py``` defines a wrapper of door opening task for training RL in gym API.
-* ```train.py```  is the main training script.
-* ```tactile_finger.py``` is a testing script for testing the simulated tactile sensing in an independent environment. It places a block on a tactile sensor and reads the force distribution. The force readings are saved in ```./data/```.
-* ```default_params.py``` defines all the hyperparameters for training, including the ```randomized_params```, which specifies the randomized parameters as defined in ```panda_open_door.py```.
-* ```./rl/td3/train_td3.py``` is for training/fine-tuning/testing with TD3 algorithm.
-
-## Start
-
-* Test tactile sensor in an independent environment:
-
-  ```bash
-  python tactile_finger.py
-  ```
-
-* Train the *PandaOpenDoorFKTactile* environment with RL algorithm TD3:
-
-  ```bash
-  python train.py --train --env pandaopendoorfktactile --process 2 
-  ```
-
-* Test a trained model with saved in `data/weights/MODEL_TIME/MODEL_INDEX_td3_*`, where ```MODEL_TIME``` indicates the time for training the model and ```MODEL_INDEX``` is an int number indicating at which episode the model is saved:
-
-  ```bash
-  python train.py --test --env pandaopendoorfktactile --model MODEL_TIME --model_id MODEL_INDEX --render
-  ```
-
-* Inspect the UR5 wrist force/torque sensor during evaluation. The console output
-  shows raw force (N), raw torque (Nm), their magnitudes, and the normalized six
-  values passed to the policy. `--ft_log` additionally saves every sample to CSV:
-
-  ```bash
-  python train.py --test --env ur5opendoorfktactile \
-    --model MODEL_TIME --model_id MODEL_INDEX --render \
-    --debug_ft --debug_ft_every 10 --ft_log log/ft_evaluation.csv
-  ```
-
-  Plot the resulting force/torque log (add `--show` for an interactive window):
-
-  ```bash
-  python plot_ft_results.py log/ft_evaluation.csv \
-    --output log/ft_evaluation_plot.png
-  ```
-  
-  
-
-  
+Original repository:
+[quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation](https://github.com/quantumiracle/Robotic_Door_Opening_with_Tactile_Simulation)
